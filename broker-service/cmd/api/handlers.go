@@ -11,6 +11,7 @@ type RequestPayload struct {
 	Action string      `json:"action"`
 	Auth   AuthPayload `json:"auth,omitempty"`
 	Log    LogPayload  `json:"log,omitempty"`
+	Mail   mailPayload `json:"mail,omitempty"`
 }
 
 type AuthPayload struct {
@@ -21,6 +22,15 @@ type AuthPayload struct {
 type LogPayload struct {
 	Name string `json:"name"`
 	Data string `json:"data"`
+}
+
+type mailPayload struct {
+	From        string   `json:"from"`
+	To          string   `json:"to"`
+	Subject     string   `json:"subject"`
+	Message     string   `json:"message"`
+	FromName    string   `json:"fromname"`
+	Attachments []string `json:"attachments"`
 }
 
 func (app *Config) Brocker(w http.ResponseWriter, r *http.Request) {
@@ -51,11 +61,69 @@ func (app *Config) HandleSubmission(w http.ResponseWriter, r *http.Request) {
 		app.authenticate(w, requestPayload.Auth)
 	case "Log":
 		app.logItem(w, requestPayload.Log)
-
+	case "mail":
+		app.SendMail(w, requestPayload.Mail)
 	default:
 		app.errorJSON(w, errors.New("invalid methode"), http.StatusBadRequest)
 
 	}
+
+}
+
+func (app *Config) SendMail(w http.ResponseWriter, mail mailPayload) {
+	jsonData, _ := json.MarshalIndent(mail, "", "\t")
+
+	request, err := http.NewRequest("POST", "http://mail-service/send", bytes.NewBuffer(jsonData))
+
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	client := http.Client{}
+
+	response, err := client.Do(request)
+
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	defer response.Body.Close()
+
+	// make shure we get the correct status
+
+	if response.StatusCode != http.StatusAccepted {
+		app.errorJSON(w, errors.New("error calling service "))
+		return
+	}
+
+	//create a variable we'll read response.Body into
+
+	var jsonFromService jsonResponse
+
+	//decode the json from the auth service
+
+	err = json.NewDecoder(response.Body).Decode(&jsonFromService)
+
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	if jsonFromService.Error {
+		app.errorJSON(w, err, http.StatusUnauthorized)
+		return
+
+	}
+
+	var payload jsonResponse
+
+	payload.Error = false
+	payload.Message = "email has been sent"
+	payload.Data = jsonFromService.Data
+
+	app.writeJSON(w, http.StatusAccepted, payload)
 
 }
 
